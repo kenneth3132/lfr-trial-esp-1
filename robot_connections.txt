@@ -1,0 +1,43 @@
+# Robot Wiring Connections & Purposes
+
+This document outlines all physical connections for your ESP32-based PID line follower.
+
+## 1. Wiring Table
+
+| Component | Pin Name | ESP32 Pin | Purpose |
+| :--- | :--- | :--- | :--- |
+| **RLS-08** | S1 (Far Left) | GPIO 36 | Analog position feedback (ADC1_CH0) |
+| **RLS-08** | S2 | GPIO 39 | Analog position feedback (ADC1_CH3) |
+| **RLS-08** | S3 | GPIO 34 | Analog position feedback (ADC1_CH6) |
+| **RLS-08** | S4 (Mid-Left) | GPIO 35 | Analog position feedback (ADC1_CH7) |
+| **RLS-08** | S5 (Mid-Right) | GPIO 32 | Analog position feedback (ADC1_CH4) |
+| **RLS-08** | S6 | GPIO 33 | Analog position feedback (ADC1_CH5) |
+| **RLS-08** | S7 | GPIO 25 | Analog position feedback (ADC2_CH8) |
+| **RLS-08** | S8 (Far Right) | GPIO 26 | Analog position feedback (ADC2_CH9) |
+| **TB6612FNG** | PWMA | GPIO 17 | Left motor speed control (PWM) |
+| **TB6612FNG** | AIN1 | GPIO 4 | Left motor direction |
+| **TB6612FNG** | AIN2 | GPIO 16 | Left motor direction |
+| **TB6612FNG** | PWMB | GPIO 15 | Right motor speed control (PWM) |
+| **TB6612FNG** | BIN1 | GPIO 5 | Right motor direction |
+| **TB6612FNG** | BIN2 | GPIO 18 | Right motor direction |
+| **TB6612FNG** | STBY | GPIO 19 | Logic HIGH enables motor driver |
+| **Button 1** | Start/Stop | GPIO 27 | Pin to GND (Start/Stop PID) |
+| **Button 2** | Calibrate | GPIO 14 | Pin to GND (Start Calibration) |
+| **Button 3** | Mode | GPIO 13 | Pin to GND (Toggle Track Mode) |
+| **Status LED** | Onboard | GPIO 2 | Visual feedback during calibration |
+
+---
+
+## 2. Connection Purposes & Logic
+
+### Sensor Array (RLS-08)
+* **Analog (ADC) Interface**: These 8 pins carry variable voltages representing how much light is reflected. They allow the ESP32 to calculate a precise "weighted position" of the line rather than just "line/no-line" data, which is essential for high-speed PID control.
+
+### Motor Driver (TB6612FNG)
+* **PWM Pins (PWMA/PWMB)**: These pins deliver a rapid high-frequency signal that allows the ESP32 to control motor speed from 0% to 100% via the PID algorithm.
+* **Direction Pins (AIN/BIN)**: By setting one HIGH and the other LOW, you determine the spin direction of each motor.
+* **Standby (STBY)**: This is the "Safety Switch". When held LOW, the motors are completely disabled. Keeping it HIGH at GPIO 19 ensures the driver is always ready to receive commands.
+
+### User Interface (Buttons & LED)
+* **Internal Pull-Ups (Buttons)**: Your code uses `INPUT_PULLUP`. This means the pin is normally internally pulled HIGH (3.3V). When you press the button, it connects the pin to GND, triggering a "LOW" signal which the ESP32 detects as a button press. This removes the need for external resistors.
+* **Onboard LED (GPIO 2)**: This provides visual feedback to the user without needing an OLED. It blinks rapidly during calibration (so you know to move the robot) and turns solid when the robot is actively running in PID mode.

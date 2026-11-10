@@ -1,0 +1,649 @@
+﻿
+
+ESP32 Line Follower Robot with PID Control | Team Gearheads
+
+ Back to Projects
+
+ESP32 PID Fast Line Follower Robot
+
+ Code
+
+ Circuit
+
+ 3D File
+
+About This Project
+
+          This is a high-performance 
+ESP32-based line follower robot
+ that utilizes a PID (Proportional-Integral-Derivative) control algorithm for exceptional tracking accuracy at speed. Unlike basic line followers that simply react to sensor inputs, this robot predicts and compensates for deviations before they become significant errors, resulting in incredibly smooth and stable line tracking even around sharp curves and complex track layouts.
+
+          At the heart of this system is an ESP32 microcontroller paired with a 13-channel TCRT5000L sensor array that provides high-resolution position data. The PID controller constantly calculates the robot's position relative to the line and adjusts motor speeds hundreds of times per second to maintain perfect alignment. The result is a robot that can navigate challenging courses at speeds that would cause conventional line followers to lose their way.
+
+          This project is ideal for robotics competitions, STEM education, and anyone interested in learning advanced control systems. The code includes an interactive OLED menu system that allows you to tune PID parameters, adjust speed settings, and configure sensor thresholds in real-time without needing to re-upload code — making it perfect for track-side tuning and experimentation.
+
+How It Works
+
+Sensor Array Reading
+
+13 IR sensors continuously scan the track surface at high frequency, detecting line position
+
+Position Calculation
+
+Weighted centroid method computes exact line position (0–1300 range) relative to robot center
+
+PID Error Correction
+
+Controller calculates correction = Kp×error + Ki×integral + Kd×derivative
+
+Motor PWM Output
+
+ESP32 generates differential PWM signals via TB6612FNG driver for precise steering
+
+Key Features
+
+          The PID control loop is the star of this project, providing proportional gain for immediate response to line deviations, integral gain to eliminate steady-state error over long curves, and derivative gain to anticipate future errors based on current rate of change. This three-term controller ensures the robot stays locked onto the line with minimal oscillation, even at speeds exceeding 2 meters per second.
+
+          The 
+13-channel sensor array
+ offers exceptional resolution, allowing the robot to detect even the slightest line drift. Each TCRT5000L sensor uses infrared reflectance to distinguish between the black line and white surface, and the multiplexed reading system ensures all sensors are sampled efficiently without consuming excessive GPIO pins.
+
+          The built-in 
+OLED interface
+ and 5-button navigation system provide real-time access to critical parameters. You can adjust Kp, Kd, base speed, and sensor thresholds on the fly, with all settings automatically saved to EEPROM. This feature is invaluable for competition scenarios where track conditions vary and rapid tuning is essential.
+
+Technical Specifications
+
+ Microcontroller
+
+ESP32 (240MHz dual-core, 520KB SRAM)
+
+ Sensor Array
+
+13× TCRT5000L IR Reflectance Sensors
+
+ Motor Driver
+
+TB6612FNG (3A peak, dual H‑bridge)
+
+ Power Supply
+
+2S LiPo (7.4V) with 5V regulation for logic
+
+ User Interface
+
+128×64 OLED display + 5‑way navigation button
+
+ Control Algorithm
+
+PID with error window filtering and line loss recovery
+
+ Tuning Interface
+
+On‑device menu system with EEPROM save/load
+
+ Track Mode
+
+Configurable for black line on white / white line on black
+
+ Lost Line Recovery
+
+30ms timeout with predictive spin direction
+
+Components List
+
+1×
+
+ESP32 Development Board
+
+Main controller
+
+13×
+
+TCRT5000L IR Sensors
+
+Line detection array
+
+1×
+
+TB6612FNG Motor Driver
+
+Dual DC motor control
+
+2×
+
+DC Motors (500‑1000 RPM)
+
+Drive system
+
+1×
+
+OLED Display (128×64)
+
+UI and tuning interface
+
+5×
+
+Tactile Push Buttons
+
+Menu navigation (up/down/left/right/select)
+
+1×
+
+74HC4067 Multiplexer
+
+16‑channel analog mux for sensors
+
+1×
+
+7.4V 2S LiPo Battery
+
+Power source
+
+—
+
+3D Printed Chassis
+
+Structural frame (STL available)
+
+Code
+
+1. ESP32 Firmware (.ino)
+
+ lfr_esp32.ino
+
+ Copy
+
+ Download
+
+#include &lt;Wire.h&gt;
+#include &lt;Adafruit_GFX.h&gt;
+#include &lt;Adafruit_SSD1306.h&gt;
+#include &lt;EEPROM.h&gt;
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+#define SDA_PIN 21
+#define SCL_PIN 22
+#define MUX_SIG  34   
+#define MUX_S0   25
+#define MUX_S1   26
+#define MUX_S2   27
+#define MUX_S3   14
+const int SENSOR_COUNT = 13;
+#define IN1 4
+#define IN2 16
+#define IN3 5
+#define IN4 2
+#define ENA 17   
+#define ENB 15    
+#define BTN_UP     32
+#define BTN_DOWN   33
+#define BTN_LEFT   18
+#define BTN_RIGHT  19
+#define BTN_MIDDLE 23
+float Kp = 2;
+float Ki = 0;
+float Kd = 2;
+unsigned long lostStartTime = 0;
+const unsigned long lostTimeout = 30;
+int sensorValues[13];
+int weights[13] = {100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300}; 
+int position;
+int lastError = 0;
+float integral = 0;
+int baseSpeed = 120;
+int fullSpeed = 255;
+int errorWindow = 50;
+bool isRunning = false;
+#define MENU_MAIN 0
+#define MENU_SETTINGS 1
+int currentMenu = MENU_MAIN;
+int mainMenuSelection = 0;  
+int settingsMenuSelection = 0;  
+int trackMode = 0;          
+int speedValue = 150;      
+int sensorThreshold = 600;  
+int KpValue = 5;           
+int KdValue = 15;           
+unsigned long lastDebounceTime = 0;
+const unsigned long debounceDelay = 200;
+
+int pwmA = 0;
+int pwmB = 1;
+const int pwmFreq = 10000;
+const int pwmRes = 8;
+
+void setup() {
+  Serial.begin(115200);
+
+  // Initialize OLED
+  Wire.begin(SDA_PIN, SCL_PIN);
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;); 
+  }
+  display.clearDisplay();
+  display.display();
+  // Initialize EEPROM
+  EEPROM.begin(128);
+  loadSettings();
+  // MUX select pins
+  pinMode(MUX_S0, OUTPUT);
+  pinMode(MUX_S1, OUTPUT);
+  pinMode(MUX_S2, OUTPUT);
+  pinMode(MUX_S3, OUTPUT);
+  // Motors
+  pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
+  // PWM setup
+  ledcSetup(pwmA, pwmFreq, pwmRes);
+  ledcSetup(pwmB, pwmFreq, pwmRes);
+  ledcAttachPin(ENA, pwmA);
+  ledcAttachPin(ENB, pwmB);
+  // Buttons
+  pinMode(BTN_UP, INPUT_PULLUP);
+  pinMode(BTN_DOWN, INPUT_PULLUP);
+  pinMode(BTN_LEFT, INPUT_PULLUP);
+  pinMode(BTN_RIGHT, INPUT_PULLUP);
+  pinMode(BTN_MIDDLE, INPUT_PULLUP);
+
+  stopMotors();
+  displayMainMenu();
+}
+
+void loadSettings() {
+  trackMode = EEPROM.read(0);
+  if (trackMode > 1) trackMode = 0;
+  speedValue = EEPROM.read(1);
+  if (speedValue 
+ 255) speedValue = 120;
+  EEPROM.get(2, sensorThreshold);
+  if (sensorThreshold 
+ 2000) sensorThreshold = 200;
+  EEPROM.get(4, KpValue);
+  if (KpValue 
+ 100) KpValue = 2;
+  EEPROM.get(6, KdValue);
+  if (KdValue 
+ 100) KdValue = 2;
+  baseSpeed = speedValue;
+  fullSpeed = constrain(speedValue + 50, 50, 255);
+  Kp = KpValue;  
+  Kd = KdValue; 
+
+}
+
+void saveSettings() {
+  EEPROM.write(0, trackMode);
+  EEPROM.write(1, speedValue);
+  EEPROM.put(2, sensorThreshold);
+  EEPROM.put(4, KpValue);
+  EEPROM.put(6, KdValue);
+  EEPROM.commit();
+
+  baseSpeed = speedValue;
+  fullSpeed = constrain(speedValue + 10, 50, 255);
+  Kp = KpValue;  
+  Kd = KdValue;  
+}
+
+void loop() {
+  if (isRunning) {
+    runLineFollower();
+  } else {
+    handleMenu();
+  }
+}
+
+void runLineFollower() {
+  readSensors();
+  bool allBlack = true;
+  for (int i = 0; i 
+ 0) {
+        spinRightslow();
+      } else {
+        spinLeftslow();
+      }
+      return;
+    }
+  } else {
+    lostStartTime = 0;
+  }
+
+  position = calculatePosition();
+
+      int error = position - 700;
+
+    if (abs(error) 
+ debounceDelay) {
+
+    // UP button
+    if (digitalRead(BTN_UP) == LOW) {
+      if (currentMenu == MENU_MAIN) {
+        mainMenuSelection = (mainMenuSelection == 0) ? 1 : 0;
+        displayMainMenu();
+      } else if (currentMenu == MENU_SETTINGS) {
+        settingsMenuSelection = (settingsMenuSelection - 1 + 6) % 6;  
+        displaySettingsMenu();
+      }
+      lastDebounceTime = millis();
+    }
+
+    else if (digitalRead(BTN_DOWN) == LOW) {
+      if (currentMenu == MENU_MAIN) {
+        mainMenuSelection = (mainMenuSelection + 1) % 2;
+        displayMainMenu();
+      } else if (currentMenu == MENU_SETTINGS) {
+        settingsMenuSelection = (settingsMenuSelection + 1) % 6; 
+        displaySettingsMenu();
+      }
+      lastDebounceTime = millis();
+    }
+
+    else if (digitalRead(BTN_LEFT) == LOW && currentMenu == MENU_SETTINGS) {
+      switch (settingsMenuSelection) {
+        case 0: 
+          trackMode = (trackMode == 0) ? 1 : 0;
+          break;
+        case 1: 
+          speedValue = constrain(speedValue - 10, 50, 255);
+          break;
+        case 2: 
+          sensorThreshold = constrain(sensorThreshold - 50, 50, 2000);
+          break;
+        case 3: 
+          KpValue = constrain(KpValue - 1, 0, 50);
+          break;
+        case 4:
+          KdValue = constrain(KdValue - 1, 0, 50);
+          break;
+      }
+      displaySettingsMenu();
+      lastDebounceTime = millis();
+    }
+
+    else if (digitalRead(BTN_RIGHT) == LOW && currentMenu == MENU_SETTINGS) {
+      switch (settingsMenuSelection) {
+        case 0: 
+          trackMode = (trackMode == 0) ? 1 : 0;
+          break;
+        case 1: 
+          speedValue = constrain(speedValue + 10, 50, 255);
+          break;
+        case 2:
+          sensorThreshold = constrain(sensorThreshold + 50, 50, 2000);
+          break;
+        case 3: 
+          KpValue = constrain(KpValue + 1, 0, 50);
+          break;
+        case 4: 
+          KdValue = constrain(KdValue + 1, 0, 50);
+          break;
+      }
+      displaySettingsMenu();
+      lastDebounceTime = millis();
+    }
+
+    else if (digitalRead(BTN_MIDDLE) == LOW) {
+      if (currentMenu == MENU_MAIN) {
+        if (mainMenuSelection == 0) {
+          isRunning = true;
+          lastError = 0;
+          integral = 0;
+          displayRunningScreen();
+          delay(500);
+        } else if (mainMenuSelection == 1) {
+          currentMenu = MENU_SETTINGS;
+          settingsMenuSelection = 0;
+          displaySettingsMenu();
+        }
+      } else if (currentMenu == MENU_SETTINGS) {
+        if (settingsMenuSelection == 5) {   
+          saveSettings();
+          currentMenu = MENU_MAIN;
+          displayMainMenu();
+        }
+      }
+      lastDebounceTime = millis();
+    }
+  }
+}
+
+void displayMainMenu() {
+  display.clearDisplay();
+
+  // Title
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(15, 5);
+  display.println("Team Gearheads");
+
+  // Options
+  display.setTextSize(1);
+
+  // Start option
+  display.setCursor(20, 30);
+  if (mainMenuSelection == 0) {
+    display.print("> ");
+  } else {
+    display.print("  ");
+  }
+  display.println("START");
+
+  // Settings option
+  display.setCursor(20, 45);
+  if (mainMenuSelection == 1) {
+    display.print("> ");
+  } else {
+    display.print("  ");
+  }
+  display.println("SETTINGS");
+
+  display.display();
+}
+
+void displaySettingsMenu() {
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+
+  // Track Mode
+  display.setCursor(5, 5);
+  if (settingsMenuSelection == 0) {
+    display.print("> ");
+  } else {
+    display.print("  ");
+  }
+  display.print("Track: ");
+  display.println(trackMode == 0 ? "BLACK" : "WHITE");
+
+  // Speed
+  display.setCursor(5, 15);
+  if (settingsMenuSelection == 1) {
+    display.print("> ");
+  } else {
+    display.print("  ");
+  }
+  display.print("Speed: ");
+  display.println(speedValue);
+
+  // Threshold
+  display.setCursor(5, 25);
+  if (settingsMenuSelection == 2) {
+    display.print("> ");
+  } else {
+    display.print("  ");
+  }
+  display.print("Threshold: ");
+  display.println(sensorThreshold);
+
+  // Kp
+  display.setCursor(5, 35);
+  if (settingsMenuSelection == 3) {
+    display.print("> ");
+  } else {
+    display.print("  ");
+  }
+  display.print("Kp: ");
+  display.println(KpValue);
+
+  // Kd
+  display.setCursor(5, 45);
+  if (settingsMenuSelection == 4) {
+    display.print("> ");
+  } else {
+    display.print("  ");
+  }
+  display.print("Kd: ");
+  display.println(KdValue);
+
+  // OK button
+  display.setCursor(5, 55);
+  if (settingsMenuSelection == 5) {
+    display.print("> ");
+  } else {
+    display.print("  ");
+  }
+  display.println("OK"); 
+
+  display.display();
+}
+
+void displayRunningScreen() {
+  display.clearDisplay();
+
+  display.setTextSize(2);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(25, 20);
+  display.println("RUNNING");
+
+  display.setTextSize(1);
+  display.setCursor(10, 45);
+  display.print("Kp:");
+  display.print(Kp);
+  display.print(" Kd:");
+  display.print(Kd);
+
+  display.display();
+}
+int readMuxChannel(int channel) {
+  digitalWrite(MUX_S0, channel & 1);
+  digitalWrite(MUX_S1, (channel >> 1) & 1);
+  digitalWrite(MUX_S2, (channel >> 2) & 1);
+  digitalWrite(MUX_S3, (channel >> 3) & 1);
+  delayMicroseconds(50);
+  return analogRead(MUX_SIG);
+}
+
+void readSensors() {
+  for (int i = 0; i 
+ sensorThreshold) ? 1 : 0;
+    } else {
+      sensorValues[i] = (raw > sensorThreshold) ? 0 : 1;
+    }
+  }
+}
+
+int calculatePosition() {
+  int num = 0, den = 0;
+
+  for (int i = 0; i 
+= 0) { digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW); }
+    else        { digitalWrite(IN1, LOW);  digitalWrite(IN2, HIGH); L = -L; }
+
+    if (R >= 0) { digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW); }
+    else        { digitalWrite(IN3, LOW);  digitalWrite(IN4, HIGH); R = -R; }
+
+    ledcWrite(pwmA, L);
+    ledcWrite(pwmB, R);
+}
+
+void stopMotors() {
+  ledcWrite(pwmA, 0);
+  ledcWrite(pwmB, 0);
+  digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+}
+
+void spinLeft() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+  ledcWrite(pwmA, 255);
+  ledcWrite(pwmB, 255);
+}
+
+void spinRight() {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);  digitalWrite(IN4, HIGH);
+  ledcWrite(pwmA, 255);
+  ledcWrite(pwmB, 255);
+}
+
+void spinRightslow() {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);  digitalWrite(IN4, HIGH);
+  ledcWrite(pwmA, 150);
+  ledcWrite(pwmB, 150);
+}
+void spinLeftslow() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+  ledcWrite(pwmA, 150);
+  ledcWrite(pwmB, 150);
+}
+
+Circuit
+
+Circuit Diagram
+
+The circuit diagram below illustrates the complete wiring for the ESP32 PID line follower robot. The ESP32 connects to the 74HC4067 multiplexer for reading all 13 TCRT5000L sensors using just one analog pin. The TB6612FNG motor driver receives PWM signals from the ESP32 for speed control and direction pins for steering. The OLED display and 5‑button keypad provide the user interface for on‑the‑fly parameter tuning.
+
+ Download Circuit Diagram
+
+3D FILE
+
+3D Printed Chassis
+
+              The line follower robot chassis is fully 3D‑printable, allowing you to customise and replicate the design. This modular frame is designed to house all components securely while maintaining a lightweight structure for optimal performance.
+
+Key Features:
+
+Optimised structural design for maximum rigidity and minimum weight
+
+Integrated compartments for battery, motor driver, and sensor placement
+
+Precision motor mounting points with adjustable alignment
+
+Cable management channels to keep wiring organised
+
+Compatible with standard wheel axles and sensor arrays
+
+High‑resolution STL file for professional 3D printing
+
+Print Settings:
+ We recommend using PLA or PETG material with 20% infill for the best balance of strength and printing time.
+
+ Download STL
+
+Additional Downloads
+
+ Download Frame .stl file (Google Drive)
+
+ Back to Projects
+
+ Comments
+
+            Join the conversation! Please log in to leave a comment.
+
+Safe & Anonymous:
+ Your email stays hidden forever. We only display your first name.
+
+Login to Comment
+
+ Posting securely. Your email is hidden, only your first name will be visible to others.
+
+ Post Comment
+
+&times;

@@ -1,0 +1,35 @@
+# Arduino IDE: Uploading Code to ESP32
+
+Follow these steps to set up your environment and upload the robot firmware.
+
+## 1. Install ESP32 Board Support
+1. Open **Arduino IDE**.
+2. Go to **File > Preferences** (`Ctrl + ,`).
+3. Under **"Additional boards manager URLs"**, paste:
+   `https://espressif.github.io/arduino-esp32/package_esp32_index.json`
+4. Click **OK**.
+5. Go to **Tools > Board > Boards Manager...** (or click the board icon on the sidebar).
+6. Search for `esp32`.
+7. Click **Install** on **"esp32 by Espressif Systems"**.
+
+## 2. Prepare the Code
+1. Open your main firmware file in Arduino IDE:
+   `C:\Users\kenne\Desktop\lfr esp32\lfr_esp32_pid\lfr_esp32_pid.ino`
+2. **Note**: You do not need any external libraries. Everything uses the built-in ESP32 core libraries.
+
+## 3. Configure Board and Port
+1. Go to **Tools > Board > esp32 > ESP32 Dev Module**.
+2. Go to **Tools > Port** and select **COM9**.
+3. Go to **Tools > Upload Speed** and select **921600** (or `115200` if it fails).
+
+## 4. Upload
+1. Click the **Upload** button (the `→` arrow icon).
+2. Wait for the output console to display `Connecting........`.
+3. If it hangs, press and hold the **BOOT button** on your ESP32 until the status bar shows `Writing...`.
+4. Wait for the message: `Hard resetting via RTS pin...` and `Done uploading`.
+
+## 5. Verify
+1. Click the **Serial Monitor** icon (top-right, magnifying glass).
+2. Set the baud rate to **115200** in the bottom-right corner.
+3. You should see:
+   `--- ESP32 PID Fast Line Follower (SmartElex RLS-08) ---`
